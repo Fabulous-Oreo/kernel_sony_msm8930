@@ -43,7 +43,10 @@
 #include <linux/export.h>
 #include <linux/module.h>
 #endif
-
+#ifdef CONFIG_FB
+#include <linux/notifier.h>
+#include <linux/fb.h>
+#endif
 /* helpers */
 #define GET_NUM_TOUCHES(x)          ((x) & 0x0F)
 #define IS_LARGE_AREA(x)            (((x) & 0x10) >> 4)
@@ -413,8 +416,8 @@ struct cyttsp {
 	bool ca_available;
 	bool ca_enabled;
 	#endif
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	struct early_suspend early_suspend;
+#ifdef CONFIG_FB
+	struct notifier_block fb_notif;
 #endif
 #ifdef CY_USE_WATCHDOG
 	struct work_struct work;
@@ -3758,7 +3761,7 @@ static void cyttsp_ldr_free(struct cyttsp *ts)
 static int _cyttsp_resume_sleep(struct cyttsp *ts)
 {
 	int retval = 0;
-#if defined(CONFIG_PM) || defined(CONFIG_HAS_EARLYSUSPEND)
+#if defined(CONFIG_PM) || defined(CONFIG_FB)
 	u8 sleep = CY_DEEP_SLEEP_MODE;
 
 	printk("[%s] Enter Deep_Sleep_mode! \n",__func__);
@@ -4172,7 +4175,7 @@ static void cyttsp_ts_work_func(struct work_struct *work)
 static int _cyttsp_wakeup(struct cyttsp *ts)
 {
 	int retval = 0;
-#if defined(CONFIG_PM) || defined(CONFIG_HAS_EARLYSUSPEND)
+#if defined(CONFIG_PM) || defined(CONFIG_FB)
 	struct cyttsp_status_regs status_regs;	
 	int wake = CY_WAKE_DFLT;
 	memset(&status_regs, 0, sizeof(struct cyttsp_status_regs));
@@ -4241,7 +4244,7 @@ _cyttsp_wakeup_exit:
 	return retval;
 }
 
-#if defined(CONFIG_PM) || defined(CONFIG_HAS_EARLYSUSPEND)
+#if defined(CONFIG_PM) || defined(CONFIG_FB)
 int cyttsp_resume(void *handle)
 {
 	struct cyttsp *ts = handle;
@@ -4393,23 +4396,28 @@ cyttsp_suspend_exit:
 EXPORT_SYMBOL_GPL(cyttsp_suspend);
 #endif
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-void cyttsp_early_suspend(struct early_suspend *h)
+#ifdef CONFIG_FB
+void cyttsp_fb_suspend(struct cyttsp *ts)
 {
-	struct cyttsp *ts = container_of(h, struct cyttsp, early_suspend);
+	struct device *dev = &ts->dev;
+	if (ts->was_suspended)
+		return;
 	int retval = 0;
 	Printlog("[%s]:\n",__FUNCTION__);
-	cyttsp_dbg(ts, CY_DBG_LVL_3, "%s: EARLY SUSPEND ts=%p\n", __func__, ts);
+	cyttsp_dbg(ts, CY_DBG_LVL_3, "%s: FB SUSPEND ts=%p\n", __func__, ts);
 	retval = cyttsp_suspend(ts);
 	if (retval < 0) {
-		pr_err("%s: Early suspend failed with error code %d\n",
+		pr_err("%s: FB suspend failed with error code %d\n",
 			__func__, retval);
 	}
+	ts->was_suspended = true;
 }
 
-void cyttsp_late_resume(struct early_suspend *h)
+void cyttsp_fb_late_resume(struct cyttsp *ts)
 {
-	struct cyttsp *ts = container_of(h, struct cyttsp, early_suspend);
+	struct device *dev = &ts->dev;
+	if (!ts->was_suspended)
+		return;
 	int retval = 0;
 	Printlog("[%s]:\n",__FUNCTION__);
 	cyttsp_dbg(ts, CY_DBG_LVL_3, "%s: LATE RESUME ts=%p\n", __func__, ts);
@@ -4418,6 +4426,42 @@ void cyttsp_late_resume(struct early_suspend *h)
 		pr_err("%s: Late resume failed with error code %d\n",
 			__func__, retval);
 	}
+	ts->was_suspended = false;
+}
+static int fb_notifier_callback(struct notifier_block *self,
+				unsigned long event, void *data)
+{
+	struct fb_event *evdata = data;
+	int *blank;
+	struct cyttsp *ts = container_of(self, struct cyttsp, fb_notif);
+
+	if (evdata && evdata->data && ts) {
+		if (event == FB_EVENT_BLANK) {
+			blank = evdata->data;
+			if (*blank == FB_BLANK_UNBLANK)
+				cyttsp_fb_late_resume(ts);
+			else if (*blank == FB_BLANK_POWERDOWN)
+				cyttsp_fb_suspend(ts);
+		}
+	}
+
+	return 0;
+}
+
+void cyttsp_setup_fb_suspend(struct cyttsp *ts)
+{
+	int retval = 0;
+	struct device *dev = &ts->dev;
+
+	ts->fb_notif.notifier_call = fb_notifier_callback;
+	retval = fb_register_client(&ts->fb_notif);
+	if (retval) {
+		dev_err(dev, "%s: Failed to register fb_notifier\n",
+			__func__);
+		return;
+	}
+
+	dev_info(dev, "%s: Registered fb_notifier\n", __func__);
 }
 #endif
 
@@ -4431,8 +4475,8 @@ void cyttsp_core_release(void *handle)
 		goto cyttsp_core_release_exit;
 	}
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&ts->early_suspend);
+#ifdef CONFIG_FB
+	fb_unregister_client(&ts->fb_notif);
 #endif
 	cyttsp_ldr_free(ts);
 	/* mutex must not be locked when destroy is called */
@@ -5008,11 +5052,8 @@ void *cyttsp_core_init(struct cyttsp_bus_ops *bus_ops,
 	/* Add /sys files */
 	cyttsp_ldr_init(ts);
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	ts->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
-	ts->early_suspend.suspend = cyttsp_early_suspend;
-	ts->early_suspend.resume = cyttsp_late_resume;
-	register_early_suspend(&ts->early_suspend);
+#ifdef CONFIG_FB
+	cyttsp_setup_fb_suspend(ts);
 #endif
 
 		retval = cyttsp_open(input_device);
