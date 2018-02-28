@@ -44,9 +44,10 @@
 #include <linux/mutex.h>
 #include <linux/debugfs.h>
 #include <linux/regulator/consumer.h>
-#ifdef CONFIG_HAS_EARLYSUSPEND
-#include <linux/earlysuspend.h>
-#endif /* CONFIG_HAS_EARLYSUSPEND */
+#ifdef CONFIG_FB
+#include <linux/notifier.h>
+#include <linux/fb.h>
+#endif /* CONFIG_FB */
 
 #define CY_DECLARE_GLOBALS
 
@@ -79,9 +80,9 @@ struct cyttsp {
 	struct regulator **vdd;
 	struct dentry *dir;
 	char fw_fname[FW_FNAME_LEN];
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	struct early_suspend early_suspend;
-#endif /* CONFIG_HAS_EARLYSUSPEND */
+#ifdef CONFIG_FB
+	struct notifier_block fb_notif;
+#endif /* CONFIG_FB */
 };
 static u8 irq_cnt;		/* comparison counter with register valuw */
 static u32 irq_cnt_total;	/* total interrupts */
@@ -89,10 +90,13 @@ static u32 irq_err_cnt;		/* count number of touch interrupts with err */
 #define CY_IRQ_CNT_MASK	0x000000FF	/* mapped for sizeof count in reg */
 #define CY_IRQ_CNT_REG	0x00		/* tt_undef[0]=reg 0x1B - Gen3 only */
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void cyttsp_early_suspend(struct early_suspend *handler);
-static void cyttsp_late_resume(struct early_suspend *handler);
-#endif /* CONFIG_HAS_EARLYSUSPEND */
+#ifdef CONFIG_FB
+static void cyttsp_fb_suspend(struct cyttsp *ts);
+static void cyttsp_fb_late_resume(struct cyttsp *ts);
+static int fb_notifier_callback(struct notifier_block *self,
+				unsigned long event, void *data);
+void cyttsp_qc_setup_fb_suspend(struct cyttsp *ts);
+#endif /* CONFIG_FB */
 
 #define CYTTSP_DEBUG_DIR_NAME	"ts_debug"
 
@@ -129,7 +133,7 @@ MODULE_DEVICE_TABLE(i2c, cyttsp_id);
 
 #ifdef CONFIG_PM
 static const struct dev_pm_ops cyttsp_pm_ops = {
-#ifndef CONFIG_HAS_EARLYSUSPEND
+#ifndef CONFIG_FB
 	.suspend = cyttsp_suspend,
 	.resume = cyttsp_resume,
 #endif
@@ -2857,14 +2861,9 @@ static int __devinit cyttsp_probe(struct i2c_client *client,
 		}
 	}
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	if (!(retval < CY_OK)) {
-		ts->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
-		ts->early_suspend.suspend = cyttsp_early_suspend;
-		ts->early_suspend.resume = cyttsp_late_resume;
-		register_early_suspend(&ts->early_suspend);
-	}
-#endif /* CONFIG_HAS_EARLYSUSPEND */
+#ifdef CONFIG_FB
+	cyttsp_qc_setup_fb_suspend(ts);
+#endif /* CONFIG_FB */
 	device_init_wakeup(&client->dev, ts->platform_data->wakeup);
 	mutex_init(&ts->mutex);
 
@@ -3115,9 +3114,9 @@ static int __devexit cyttsp_remove(struct i2c_client *client)
 	if (ts->platform_data->regulator_info)
 		cyttsp_power_device(ts, false);
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&ts->early_suspend);
-#endif /* CONFIG_HAS_EARLYSUSPEND */
+#ifdef CONFIG_FB
+	fb_unregister_client(&ts->fb_notif);
+#endif /* CONFIG_FB */
 
 	mutex_destroy(&ts->mutex);
 
@@ -3142,23 +3141,59 @@ static int __devexit cyttsp_remove(struct i2c_client *client)
 	return 0;
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void cyttsp_early_suspend(struct early_suspend *handler)
+#ifdef CONFIG_FB
+static void cyttsp_fb_suspend(struct cyttsp *ts)
 {
-	struct cyttsp *ts;
-
-	ts = container_of(handler, struct cyttsp, early_suspend);
+	if(ts->is_suspended)
+		return;
 	cyttsp_suspend(&ts->client->dev);
+	ts->is_suspended = true;
 }
 
-static void cyttsp_late_resume(struct early_suspend *handler)
+static void cyttsp_fb_late_resume(struct cyttsp *ts)
 {
-	struct cyttsp *ts;
-
-	ts = container_of(handler, struct cyttsp, early_suspend);
+	if(!ts->is_suspended)
+		return;
 	cyttsp_resume(&ts->client->dev);
+	ts->is_suspended = false;
 }
-#endif  /* CONFIG_HAS_EARLYSUSPEND */
+
+static int fb_notifier_callback(struct notifier_block *self,
+				unsigned long event, void *data)
+{
+	struct fb_event *evdata = data;
+	int *blank;
+	struct cyttsp *ts = container_of(self, struct cyttsp, fb_notif);
+
+	if (evdata && evdata->data && ts) {
+		if (event == FB_EVENT_BLANK) {
+			blank = evdata->data;
+			if (*blank == FB_BLANK_UNBLANK)
+				cyttsp_fb_late_resume(ts);
+			else if (*blank == FB_BLANK_POWERDOWN)
+				cyttsp_fb_suspend(ts);
+		}
+	}
+
+	return 0;
+}
+
+void cyttsp_qc_setup_fb_suspend(struct cyttsp *ts)
+{
+	int retval = 0;
+	struct device *dev = &ts->client->dev;
+
+	ts->fb_notif.notifier_call = fb_notifier_callback;
+	retval = fb_register_client(&ts->fb_notif);
+	if (retval) {
+		dev_err(dev, "%s: Failed to register fb_notifier\n",
+			__func__);
+		return;
+	}
+
+	dev_info(dev, "%s: Registered fb_notifier\n", __func__);
+}
+#endif  /* CONFIG_FB */
 
 static int cyttsp_init(void)
 {

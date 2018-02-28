@@ -422,7 +422,7 @@ static int __devexit cyttsp_i2c_remove(struct i2c_client *client)
 	return retval;
 }
 
-#if defined(CONFIG_PM) && !defined(CONFIG_HAS_EARLYSUSPEND)
+#if defined(CONFIG_PM) && !defined(CONFIG_FB)
 static int cyttsp_i2c_suspend(struct i2c_client *client, pm_message_t message)
 {
 	struct cyttsp_i2c *ts = i2c_get_clientdata(client);
@@ -450,7 +450,7 @@ static struct i2c_driver cyttsp_i2c_driver = {
 	.probe = cyttsp_i2c_probe,
 	.remove = __devexit_p(cyttsp_i2c_remove),
 	.id_table = cyttsp_i2c_id,
-#if defined(CONFIG_PM) && !defined(CONFIG_HAS_EARLYSUSPEND)
+#if defined(CONFIG_PM) && !defined(CONFIG_FB)
 	.suspend = cyttsp_i2c_suspend,
 	.resume = cyttsp_i2c_resume,
 #endif
