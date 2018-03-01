@@ -377,15 +377,7 @@ static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 #ifdef CONFIG_SUSPEND
 	for (s = &pm_states[state]; state < PM_SUSPEND_MAX; s++, state++) {
 		if (*s && len == strlen(*s) && !strncmp(buf, *s, len)) {
-#ifdef CONFIG_EARLYSUSPEND
-			if (state == PM_SUSPEND_ON || valid_state(state)) {
-				error = 0;
-				request_suspend_state(state);
-				break;
-			}
-#else
 			error = pm_suspend(state);
-#endif
 		}
 	}
 #endif

@@ -34,10 +34,6 @@
 #include <linux/kernel.h>
 #include <linux/err.h>
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-#include <linux/earlysuspend.h>
-#endif
-
 #define CY_I2C_NAME                 "cyttsp3-i2c"
 #define CY_SPI_NAME                 "cyttsp3-spi"
 #define CY_DRIVER_VERSION           "Rev3-2M-28"
@@ -187,7 +183,7 @@ void *cyttsp_core_init(struct cyttsp_bus_ops *bus_ops,
 	struct device *dev, int irq, char *name);
 
 void cyttsp_core_release(void *handle);
-#if defined(CONFIG_PM) || defined(CONFIG_HAS_EARLYSUSPEND)
+#if defined(CONFIG_PM) || defined(CONFIG_FB)
 int cyttsp_resume(void *handle);
 int cyttsp_suspend(void *handle);
 #endif

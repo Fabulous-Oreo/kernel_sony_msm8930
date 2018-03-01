@@ -63,20 +63,6 @@ struct lm3561_led_data {
 	struct i2c_client *client;
 }*private_data;
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static struct early_suspend lm3561_suspend;
-
-extern struct workqueue_struct *suspend_work_queue;
-
-struct deferred_led_change {
-	struct work_struct led_change_work;
-	struct led_classdev *led_cdev;
-    unsigned int strobe;
-    unsigned int flash;
-    unsigned int reset;
-};
-#endif
-
 unsigned int strobe_state = 0;
 unsigned int flash_state = 0;
 unsigned int reset_state = 0;
@@ -288,38 +274,6 @@ void lm3561_flash_set(struct led_classdev *led_cdev, enum led_brightness brightn
 }
 EXPORT_SYMBOL(lm3561_flash_set);
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void change_flash(struct work_struct *flash_change_data)
-{
-	struct deferred_led_change *flash_change = container_of(flash_change_data, struct deferred_led_change, led_change_work);
-	struct led_classdev *led_cdev = flash_change->led_cdev;
-	int flash = flash_change->flash;
-
-	lm3561_flash_set(led_cdev, flash);
-
-	/* Free up memory for the freq_change structure. */
-	kfree(flash_change);
-}
-
-int queue_flash_change(struct led_classdev *led_cdev, int flash)
-{
-	/* Initialize the led_change_work and its super-struct. */
-	struct deferred_led_change *flash_change = kzalloc(sizeof(struct deferred_led_change), GFP_KERNEL);
-
-	if (!flash_change)
-		return -ENOMEM;
-
-	flash_change->led_cdev = led_cdev;
-	flash_change->flash = flash;
-
-	INIT_WORK(&(flash_change->led_change_work), change_flash);
-	queue_work(suspend_work_queue, &(flash_change->led_change_work));
-
-	return 0;
-
-}
-#endif
-
 static ssize_t lm3561_flash_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	return sprintf(buf, "%u\n", flash_state);
@@ -341,10 +295,7 @@ static ssize_t lm3561_flash_store(struct device *dev, struct device_attribute *a
 		ret = count;
 
 		if (!(led_cdev->flags & LED_SUSPENDED)) {
-#ifdef CONFIG_HAS_EARLYSUSPEND
-			if (queue_flash_change(led_cdev, flash) != 0)
-#endif
-				lm3561_flash_set(led_cdev, flash);			
+			lm3561_flash_set(led_cdev, flash);			
 		}
 	}
 
@@ -373,38 +324,6 @@ void lm3561_strobe_set(struct led_classdev *led_cdev, int strobe)
 }
 EXPORT_SYMBOL(lm3561_strobe_set);
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void change_strobe(struct work_struct *strobe_change_data)
-{
-	struct deferred_led_change *strobe_change = container_of(strobe_change_data, struct deferred_led_change, led_change_work);
-	struct led_classdev *led_cdev = strobe_change->led_cdev;
-	int strobe = strobe_change->strobe;
-
-	lm3561_strobe_set(led_cdev, strobe);
-
-	/* Free up memory for the freq_change structure. */
-	kfree(strobe_change);
-}
-
-int queue_strobe_change(struct led_classdev *led_cdev, int strobe)
-{
-	/* Initialize the led_change_work and its super-struct. */
-	struct deferred_led_change *strobe_change = kzalloc(sizeof(struct deferred_led_change), GFP_KERNEL);
-
-	if (!strobe_change)
-		return -ENOMEM;
-
-	strobe_change->led_cdev = led_cdev;
-	strobe_change->strobe = strobe;
-
-	INIT_WORK(&(strobe_change->led_change_work), change_strobe);
-	queue_work(suspend_work_queue, &(strobe_change->led_change_work));
-
-	return 0;
-
-}
-#endif
-
 static ssize_t lm3561_strobe_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	return sprintf(buf, "%u\n", strobe_state);
@@ -425,10 +344,7 @@ static ssize_t lm3561_strobe_store(struct device *dev, struct device_attribute *
 		ret = count;
 
 		if (!(led_cdev->flags & LED_SUSPENDED)) {
-#ifdef CONFIG_HAS_EARLYSUSPEND
-			if (queue_strobe_change(led_cdev, strobe) != 0)
-#endif
-				lm3561_strobe_set(led_cdev, strobe);
+			lm3561_strobe_set(led_cdev, strobe);
 		}
 	}
 
@@ -516,38 +432,6 @@ void lm3561_reset_set(struct led_classdev *led_cdev, int reset)
     }
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void change_reset(struct work_struct *reset_change_data)
-{
-	struct deferred_led_change *reset_change = container_of(reset_change_data, struct deferred_led_change, led_change_work);
-	struct led_classdev *led_cdev = reset_change->led_cdev;
-	int reset = reset_change->reset;
-
-	lm3561_reset_set(led_cdev, reset);
-
-	/* Free up memory for the freq_change structure. */
-	kfree(reset_change);
-}
-
-int queue_reset_change(struct led_classdev *led_cdev, int reset)
-{
-	/* Initialize the led_change_work and its super-struct. */
-	struct deferred_led_change *reset_change = kzalloc(sizeof(struct deferred_led_change), GFP_KERNEL);
-
-	if (!reset_change)
-		return -ENOMEM;
-
-	reset_change->led_cdev = led_cdev;
-	reset_change->reset = reset;
-
-	INIT_WORK(&(reset_change->led_change_work), change_reset);
-	queue_work(suspend_work_queue, &(reset_change->led_change_work));
-
-	return 0;
-
-}
-#endif
-
 static ssize_t lm3561_reset_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	return sprintf(buf, "%u\n", reset_state);
@@ -568,10 +452,7 @@ static ssize_t lm3561_reset_store(struct device *dev, struct device_attribute *a
 		ret = count;
 
 		if (!(led_cdev->flags & LED_SUSPENDED)) {
-#ifdef CONFIG_HAS_EARLYSUSPEND
-			if (queue_reset_change(led_cdev, reset) != 0)
-#endif
-				lm3561_reset_set(led_cdev, reset);
+			lm3561_reset_set(led_cdev, reset);
 		}
 	}
 
@@ -625,21 +506,6 @@ static int lm3561_remove(struct i2c_client *client)
 
 	return 0;
 }
-
-#ifdef CONFIG_HAS_EARLYSUSPEND
-void lm3561_early_suspend(struct early_suspend *h)
-{
-	disable_lm3561();    //cut lm3561 power
-	suspend_state = 1;//2012/08/06
-}
-
-void lm3561_later_resume(struct early_suspend *h)
-{
-	enable_lm3561();
-    suspend_state = 0;//2012/08/06
-}
-#endif
-
 
 static int __devinit leds_lm3561_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
@@ -740,13 +606,6 @@ static int __devinit leds_lm3561_probe(struct i2c_client *client, const struct i
 		printk(KERN_ERR "lm3561: device_create_file failed\n");
 		goto err_led_classdev_register_failed;
 	}
-
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	lm3561_suspend.level = EARLY_SUSPEND_LEVEL_DISABLE_FB;
-	lm3561_suspend.suspend = lm3561_early_suspend;
-	lm3561_suspend.resume = lm3561_later_resume;
-	register_early_suspend(&lm3561_suspend);
-#endif
 
 	private_data = data;
     return 0;

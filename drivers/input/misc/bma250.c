@@ -28,8 +28,9 @@
 #include <linux/interrupt.h>
 #include <linux/delay.h>
 #include <linux/kernel.h>
-#ifdef CONFIG_HAS_EARLYSUSPEND
-#include <linux/earlysuspend.h>
+#ifdef CONFIG_FB
+#include <linux/notifier.h>
+#include <linux/fb.h>
 #endif
 /*#include <../arch/arm/mach-omap2/mux.h>*/
 
@@ -778,15 +779,18 @@ struct bma250_data {
 	struct mutex mode_mutex;
 	struct delayed_work work;
 	struct work_struct irq_work;
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	struct early_suspend early_suspend;
+#ifdef CONFIG_FB
+	struct notifier_block fb_notif;
 #endif
 	int IRQ;
 };
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void bma250_early_suspend(struct early_suspend *h);
-static void bma250_late_resume(struct early_suspend *h);
+#ifdef CONFIG_FB
+static void bma250_fb_suspend(struct bma250_data *data);
+static void bma250_fb_late_resume(struct bma250_data *data);
+static int fb_notifier_callback(struct notifier_block *self,
+				unsigned long event, void *data);
+void bma250_setup_fb_suspend(struct bma250_data *data);
 #endif
 
 
@@ -4742,11 +4746,8 @@ static int bma250_probe(struct i2c_client *client,
 	if (err < 0)
 		goto error_sysfs;
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	data->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
-	data->early_suspend.suspend = bma250_early_suspend;
-	data->early_suspend.resume = bma250_late_resume;
-	register_early_suspend(&data->early_suspend);
+#ifdef CONFIG_FB
+	bma250_setup_fb_suspend(data);
 #endif
 
 	mutex_init(&data->value_mutex);
@@ -4764,11 +4765,10 @@ exit:
 	return err;
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void bma250_early_suspend(struct early_suspend *h)
+#ifdef CONFIG_FB
+static void bma250_fb_suspend(struct bma250_data *data)
 {
-	struct bma250_data *data =
-		container_of(h, struct bma250_data, early_suspend);
+
 
 	Printhh("[%s] enter..\n", __FUNCTION__);
 
@@ -4780,11 +4780,8 @@ static void bma250_early_suspend(struct early_suspend *h)
 	mutex_unlock(&data->enable_mutex);
 }
 
-
-static void bma250_late_resume(struct early_suspend *h)
+static void bma250_fb_late_resume(struct bma250_data *data)
 {
-	struct bma250_data *data =
-		container_of(h, struct bma250_data, early_suspend);
 
 	Printhh("[%s] enter..\n", __FUNCTION__);
 
@@ -4796,6 +4793,41 @@ static void bma250_late_resume(struct early_suspend *h)
 	}
 	mutex_unlock(&data->enable_mutex);
 }
+
+static int fb_notifier_callback(struct notifier_block *self,
+				unsigned long event, void *data)
+{
+	struct fb_event *evdata = data;
+	int *blank;
+	struct bma250_data *bmdata = container_of(self, struct bma250_data, fb_notif);
+
+	if (evdata && evdata->data && bmdata) {
+		if (event == FB_EVENT_BLANK) {
+			blank = evdata->data;
+			if (*blank == FB_BLANK_UNBLANK)
+				bma250_fb_late_resume(bmdata);
+			else if (*blank == FB_BLANK_POWERDOWN)
+				bma250_fb_suspend(bmdata);
+		}
+	}
+
+	return 0;
+}
+
+void bma250_setup_fb_suspend (struct bma250_data *data)
+{
+	int retval = 0;
+
+	data->fb_notif.notifier_call = fb_notifier_callback;
+	retval = fb_register_client(&data->fb_notif);
+	if (retval) {
+		Printhh("[%s]: Failed to register fb_notifier\n",
+			__func__);
+		return;
+	}
+
+	Printhh("[%s]: Registered fb_notifier\n", __func__);
+}
 #endif
 
 static int __devexit bma250_remove(struct i2c_client *client)
@@ -4803,8 +4835,8 @@ static int __devexit bma250_remove(struct i2c_client *client)
 	struct bma250_data *data = i2c_get_clientdata(client);
 
 	bma250_set_enable(&client->dev, 0);
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&data->early_suspend);
+#ifdef CONFIG_FB
+	fb_unregister_client(&data->fb_notif);
 #endif
 	sysfs_remove_group(&data->input->dev.kobj, &bma250_attribute_group);
 	input_unregister_device(data->input);
