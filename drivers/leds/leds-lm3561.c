@@ -4,7 +4,6 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
-#include <linux/earlysuspend.h>
 #include <linux/platform_device.h>
 #include <linux/module.h>
 #include <linux/i2c.h>

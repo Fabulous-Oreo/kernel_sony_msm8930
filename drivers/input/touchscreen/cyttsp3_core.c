@@ -4399,7 +4399,6 @@ EXPORT_SYMBOL_GPL(cyttsp_suspend);
 #ifdef CONFIG_FB
 void cyttsp_fb_suspend(struct cyttsp *ts)
 {
-	struct device *dev = &ts->dev;
 	if (ts->was_suspended)
 		return;
 	int retval = 0;
@@ -4415,7 +4414,6 @@ void cyttsp_fb_suspend(struct cyttsp *ts)
 
 void cyttsp_fb_late_resume(struct cyttsp *ts)
 {
-	struct device *dev = &ts->dev;
 	if (!ts->was_suspended)
 		return;
 	int retval = 0;
